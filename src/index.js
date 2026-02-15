@@ -1,0 +1,17 @@
+export { AuthSnap } from './core/authsnap.js';
+export { AuthSnapError, ConfigError, ProviderError, TokenError, SessionError } from './core/errors.js';
+export { BaseProvider } from './providers/base.js';
+export { GoogleProvider } from './providers/google.js';
+export { GitHubProvider } from './providers/github.js';
+export { DiscordProvider } from './providers/discord.js';
+export { TwitterProvider } from './providers/twitter.js';
+export { AppleProvider } from './providers/apple.js';
+export { MicrosoftProvider } from './providers/microsoft.js';
+export { LinkedInProvider } from './providers/linkedin.js';
+export { SpotifyProvider } from './providers/spotify.js';
+export { SessionManager } from './session/session-manager.js';
+export { TokenStore } from './session/token-store.js';
+export { TokenRefresher } from './session/token-refresh.js';
+export { createProtectMiddleware } from './middleware/protect.js';
+export { createRateLimiter } from './middleware/rate-limit.js';
+export { AccountLinker } from './linking/account-linker.js';

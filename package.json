@@ -1,0 +1,82 @@
+{
+  "name": "auth-snap",
+  "version": "1.1.0",
+  "description": "Zero-boilerplate OAuth for any Node.js framework. 3 lines to add Google, GitHub, Discord, Twitter, Apple, Microsoft, LinkedIn, Spotify auth.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./express": "./src/adapters/express.js",
+    "./fastify": "./src/adapters/fastify.js",
+    "./hono": "./src/adapters/hono.js"
+  },
+  "files": [
+    "src/",
+    "LICENSE",
+    "CHANGELOG.md",
+    "README.md",
+    "types/"
+  ],
+  "types": "./types/index.d.ts",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "example": "node examples/express-app.js",
+    "example:fastify": "node examples/fastify-app.js"
+  },
+  "keywords": [
+    "oauth",
+    "authentication",
+    "google-auth",
+    "github-auth",
+    "discord-auth",
+    "twitter-auth",
+    "apple-auth",
+    "microsoft-auth",
+    "linkedin-auth",
+    "spotify-auth",
+    "express",
+    "fastify",
+    "hono",
+    "passport-alternative",
+    "jwt",
+    "social-login",
+    "rbac",
+    "account-linking"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "jose": "^5.2.0"
+  },
+  "peerDependencies": {
+    "express": ">=4.0.0",
+    "fastify": ">=4.0.0",
+    "@fastify/cookie": ">=9.0.0",
+    "hono": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    },
+    "@fastify/cookie": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "express": "^4.18.0",
+    "fastify": "^4.26.0",
+    "@fastify/cookie": "^9.3.0",
+    "vitest": "^1.6.0",
+    "dotenv": "^16.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

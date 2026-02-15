@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.local
+dist/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+.claude/
+nul
+.vscode/
+.idea/
+CHANGELOG.md
+PROGRESS.md
+docs
