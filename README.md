@@ -1,7 +1,7 @@
 # AuthSnap
 
 **Zero-boilerplate OAuth for any Node.js framework.**
-Add Google, GitHub, Discord, Twitter, Apple, or Microsoft authentication to your app in 3 lines of code. Works with Express, Fastify, and Hono.
+Add Google, GitHub, Discord, Twitter, Apple, Microsoft, LinkedIn, or Spotify authentication to your app in 3 lines of code. Works with Express, Fastify, and Hono.
 
 ```js
 const auth = new AuthSnap({ providers: { google: { clientId, clientSecret } }, session: { secret } });
@@ -31,6 +31,8 @@ app.get('/dashboard', auth.protect(), (req, res) => res.json({ user: req.user })
   - [Twitter / X](#twitter--x)
   - [Apple](#apple)
   - [Microsoft](#microsoft)
+  - [LinkedIn](#linkedin)
+  - [Spotify](#spotify)
 - [Custom Providers](#custom-providers)
 - [The AuthUser Object](#the-authuser-object)
 - [Session Management — How It Works Under the Hood](#session-management--how-it-works-under-the-hood)
@@ -44,7 +46,10 @@ app.get('/dashboard', auth.protect(), (req, res) => res.json({ user: req.user })
   - [onSuccess](#onsuccess)
   - [onError](#onerror)
   - [onTokenRefresh](#ontokenrefresh)
+- [Event System](#event-system)
 - [Route Protection Middleware](#route-protection-middleware)
+  - [Role-Based Access Control (RBAC)](#role-based-access-control-rbac)
+- [Account Linking](#account-linking)
 - [Rate Limiting](#rate-limiting)
 - [Security](#security)
   - [CSRF / State Protection](#csrf--state-protection)
@@ -286,6 +291,8 @@ providers: {
   twitter: { clientId: 'xxx', clientSecret: 'xxx' },
   apple: { clientId: 'xxx', clientSecret: 'xxx' },
   microsoft: { clientId: 'xxx', clientSecret: 'xxx' },
+  linkedin: { clientId: 'xxx', clientSecret: 'xxx' },
+  spotify: { clientId: 'xxx', clientSecret: 'xxx' },
 }
 ```
 
@@ -307,6 +314,8 @@ providers: {
 | Twitter/X | `users.read`, `tweet.read` | — |
 | Apple | `name`, `email` | Always shown |
 | Microsoft | `openid`, `email`, `profile`, `User.Read` | `select_account` |
+| LinkedIn | `openid`, `profile`, `email` | — |
+| Spotify | `user-read-private`, `user-read-email` | — |
 
 ### Session
 
@@ -365,7 +374,9 @@ Every provider returns the **same unified shape** — no matter if the user logg
   avatar: 'https://example.com/photo.jpg',// Profile picture URL (or null)
   provider: 'google',                     // Which provider authenticated this user
   emailVerified: true,                    // Whether the provider verified this email
-  raw: { /* ... */ }                      // Full provider-specific profile (all original fields)
+  raw: { /* ... */ },                     // Full provider-specific profile (all original fields)
+  roles: ['admin'],                       // RBAC roles (if set via onSuccess)
+  permissions: ['read:users'],            // RBAC permissions (if set via onSuccess)
 }
 ```
 
@@ -378,6 +389,8 @@ Every provider returns the **same unified shape** — no matter if the user logg
 | `provider` | `string` | The provider name: `'google'`, `'github'`, etc. |
 | `emailVerified` | `boolean` | Whether the provider confirmed this email is verified |
 | `raw` | `object` | The complete, unmodified profile response from the provider. Use this for provider-specific data (e.g. Google's `hd` domain, GitHub's `login` username) |
+| `roles` | `string[] \| undefined` | RBAC roles, present when set via `onSuccess` return value |
+| `permissions` | `string[] \| undefined` | RBAC permissions, present when set via `onSuccess` return value |
 
 ---
 
@@ -556,7 +569,7 @@ onSuccess: async (user, tokens, provider) => { return { redirect: '/dashboard' }
 | `user` | `AuthUser` | The unified user profile |
 | `tokens` | `TokenSet` | OAuth tokens (`accessToken`, `refreshToken`, `expiresAt`, `tokenType`, `scope`) |
 | `provider` | `string` | Provider name |
-| **Returns** | `{ redirect?: string }` | Where to send the user after login |
+| **Returns** | `{ redirect?, roles?, permissions? }` | Where to send the user + optional RBAC data to embed in JWT |
 
 **When it fires:** After the code exchange and profile fetch succeed — right before the JWT session is created (step 14 in the flow).
 
@@ -657,6 +670,63 @@ onTokenRefresh: (tokens, provider) => {
 
 ---
 
+## Event System
+
+AuthSnap emits events at key points in the authentication flow. Subscribe using `on()`, `once()`, or `off()`.
+
+```js
+const auth = new AuthSnap({ /* ... */ });
+
+// Listen to login events
+auth.on('login', ({ provider, req }) => {
+  console.log(`Login started: ${provider}`);
+});
+
+// Listen to successful auth
+auth.on('success', ({ user, tokens, provider }) => {
+  console.log(`${user.email} logged in via ${provider}`);
+});
+
+// Listen to errors
+auth.on('error', ({ error, provider }) => {
+  console.error(`Auth error (${provider}): ${error.message}`);
+});
+
+// Listen to logout
+auth.on('logout', () => {
+  console.log('User logged out');
+});
+
+// Listen to token refresh
+auth.on('token:refresh', ({ tokens, provider }) => {
+  console.log(`Tokens refreshed for ${provider}`);
+});
+```
+
+**Available events:**
+
+| Event | Payload | When |
+|-------|---------|------|
+| `login` | `{ provider, req }` | User starts OAuth flow (after `onBeforeAuth`) |
+| `success` | `{ user, tokens, provider }` | Auth succeeds (after `onSuccess` callback) |
+| `error` | `{ error, provider }` | Auth fails (after `onError` callback) |
+| `logout` | `{}` | User logs out |
+| `token:refresh` | `{ tokens, provider }` | Token is automatically refreshed |
+
+**Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `auth.on(event, listener)` | Subscribe to an event. Returns `this` for chaining |
+| `auth.once(event, listener)` | Subscribe once — listener auto-removes after first call |
+| `auth.off(event, listener)` | Unsubscribe a specific listener |
+
+Listener errors are caught internally so they never break the auth flow.
+
+**Events vs. Callbacks:** Events and callbacks (`onSuccess`, `onError`, etc.) both fire. Callbacks are for controlling the auth flow (e.g. returning `{ redirect }` or `{ roles }`). Events are for side effects (logging, analytics, notifications).
+
+---
+
 ## Route Protection Middleware
 
 The `auth.protect()` method returns middleware that gates routes to authenticated users only.
@@ -679,12 +749,114 @@ app.get('/dashboard', auth.protect({ redirect: '/login' }), (req, res) => {
 // Unauthenticated → 302 redirect to /login
 ```
 
+### Role-Based Access Control (RBAC)
+
+You can restrict routes by **roles** or **permissions**. First, return them from your `onSuccess` callback:
+
+```js
+const auth = new AuthSnap({
+  // ... providers, session
+  callbacks: {
+    onSuccess: async (user, tokens, provider) => {
+      // Look up user roles from your database
+      const dbUser = await db.users.findByEmail(user.email);
+      return {
+        redirect: '/dashboard',
+        roles: dbUser.roles,           // e.g. ['admin', 'editor']
+        permissions: dbUser.permissions, // e.g. ['read:users', 'write:posts']
+      };
+    },
+  },
+});
+```
+
+Then use `protect()` with role/permission requirements:
+
+```js
+// Require 'admin' role
+app.get('/admin', auth.protect({ roles: ['admin'] }), (req, res) => {
+  res.json({ user: req.user }); // req.user.roles === ['admin', ...]
+});
+
+// Require any of these roles
+app.get('/editor', auth.protect({ roles: ['admin', 'editor'] }), handler);
+
+// Require specific permission
+app.delete('/users/:id', auth.protect({ permissions: ['delete:users'] }), handler);
+
+// Redirect on forbidden (instead of 403 JSON)
+app.get('/admin', auth.protect({
+  roles: ['admin'],
+  forbiddenRedirect: '/no-access',
+}), handler);
+```
+
+**RBAC behavior:**
+- No token → **401 Unauthorized** (or redirect via `redirect` option)
+- Valid token but wrong role/permission → **403 Forbidden** (or redirect via `forbiddenRedirect`)
+- User needs at least **one** of the listed roles/permissions (OR logic)
+- Roles and permissions are stored in the JWT, available on `req.user.roles` and `req.user.permissions`
+- Fully backward-compatible — `protect()` with no options works the same as before
+
 ### What `protect()` Does Internally
 
 1. Extracts the JWT from the `authsnap_session` cookie (works with or without `cookie-parser`)
 2. Verifies the JWT signature, expiration, and issuer using `jose`
-3. If valid → sets `req.user` to the `AuthUser` object and calls `next()`
-4. If invalid/missing → returns 401 or redirects (based on options)
+3. If valid → sets `req.user` to the `AuthUser` object
+4. If roles/permissions are configured → checks `req.user.roles` / `req.user.permissions`
+5. If all checks pass → calls `next()`
+6. If invalid/missing → returns 401 or redirects
+7. If role/permission check fails → returns 403 or redirects via `forbiddenRedirect`
+
+---
+
+## Account Linking
+
+The `AccountLinker` class lets you link multiple OAuth providers to a single application user. For example, a user who signed up with Google can later link their GitHub account.
+
+```js
+import { AuthSnap, AccountLinker } from 'auth-snap';
+
+const linker = new AccountLinker();
+
+const auth = new AuthSnap({
+  // ... providers, session
+  callbacks: {
+    onSuccess: async (user, tokens, provider) => {
+      // Check if this provider account is already linked
+      const existingUserId = await linker.findByProvider(provider, user.id);
+
+      if (existingUserId) {
+        // User already linked — use their app user ID
+        return { redirect: '/dashboard' };
+      }
+
+      // New user — create app account and link
+      const appUserId = await db.users.create({ email: user.email });
+      await linker.link(appUserId, provider, user.id);
+
+      return { redirect: '/dashboard' };
+    },
+  },
+});
+```
+
+**AccountLinker methods:**
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `link(userId, provider, providerId)` | `Promise<void>` | Link a provider to an app user |
+| `unlink(userId, provider)` | `Promise<boolean>` | Unlink a provider from an app user |
+| `findByProvider(provider, providerId)` | `Promise<string \| null>` | Find the app userId linked to a provider account |
+| `getLinkedAccounts(userId)` | `Promise<Record<string, string>>` | Get all linked providers for a user (`{ google: 'g-123', github: 'gh-456' }`) |
+| `isLinked(userId, provider)` | `Promise<boolean>` | Check if a user has a specific provider linked |
+
+**Pluggable store:** By default, `AccountLinker` uses an in-memory store. For production, pass your own store:
+
+```js
+const linker = new AccountLinker(myDatabaseStore);
+// Store must implement: link, unlink, getLinkedAccounts, findByProvider, isLinked
+```
 
 ---
 
@@ -767,6 +939,8 @@ const auth = new AuthSnap({
 ```
 
 The key format is `{provider}:{userId}` (e.g. `google:123456`). The tokens object has the shape `{ accessToken, refreshToken, expiresAt, tokenType, scope }`.
+
+A ready-made **Redis token store** example is available in `examples/stores/redis-token-store.js`.
 
 ---
 
@@ -869,6 +1043,33 @@ microsoft: {
 }
 ```
 
+### LinkedIn
+
+**Setup:** [LinkedIn Developers](https://www.linkedin.com/developers/apps) → Create App → Products → "Sign In with LinkedIn using OpenID Connect"
+
+**Callback URL to register:** `http://localhost:3000/auth/linkedin/callback`
+
+**Special behavior:**
+- Uses **OAuth 2.0 + OpenID Connect** — profile from OIDC userinfo endpoint
+- Returns `sub` as user ID, `name`, `email`, `picture`, `email_verified`
+- No special prompt — LinkedIn handles consent internally
+
+**Unique data in `raw`:** `sub`, `email_verified`, `picture`
+
+### Spotify
+
+**Setup:** [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) → Create App
+
+**Callback URL to register:** `http://localhost:3000/auth/spotify/callback`
+
+**Special behavior:**
+- Uses **Spotify Web API** (`/v1/me`) for user profile
+- Avatar is extracted from `images[0].url` array
+- `display_name` is used for the name field, falling back to `id`
+- `emailVerified` is always `false` (Spotify doesn't expose this)
+
+**Unique data in `raw`:** `display_name`, `images`, `product`, `country`, `followers`
+
 ---
 
 ## Custom Providers
@@ -878,13 +1079,13 @@ You can add any OAuth 2.0 provider by extending `BaseProvider`:
 ```js
 import { AuthSnap, BaseProvider } from 'auth-snap';
 
-class LinkedInProvider extends BaseProvider {
+class MyCustomProvider extends BaseProvider {
   constructor(config) {
-    super('linkedin', config, {
-      authorization: 'https://www.linkedin.com/oauth/v2/authorization',
-      token: 'https://www.linkedin.com/oauth/v2/accessToken',
-      userinfo: 'https://api.linkedin.com/v2/me',
-    }, ['r_liteprofile', 'r_emailaddress']); // default scopes
+    super('custom', config, {
+      authorization: 'https://provider.com/oauth/authorize',
+      token: 'https://provider.com/oauth/token',
+      userinfo: 'https://api.provider.com/me',
+    }, ['profile', 'email']); // default scopes
   }
 
   async getProfile(accessToken) {
@@ -892,9 +1093,9 @@ class LinkedInProvider extends BaseProvider {
     return {
       id: raw.id,
       email: raw.email,
-      name: `${raw.localizedFirstName} ${raw.localizedLastName}`,
-      avatar: raw.profilePicture?.displayImage || null,
-      provider: 'linkedin',
+      name: raw.name,
+      avatar: raw.avatar || null,
+      provider: 'custom',
       emailVerified: true,
       raw,
     };
@@ -903,8 +1104,8 @@ class LinkedInProvider extends BaseProvider {
 
 const auth = new AuthSnap({
   providers: {
-    linkedin: {
-      provider: LinkedInProvider,  // Pass your class here
+    custom: {
+      provider: MyCustomProvider,  // Pass your class here
       clientId: 'xxx',
       clientSecret: 'xxx',
     },
@@ -988,8 +1189,11 @@ The main entry point.
 | `.express()` | `express.Router` | Returns an Express router with all auth routes mounted |
 | `.fastify()` | `Function` | Returns a Fastify plugin with all auth routes |
 | `.hono()` | `Function` | Returns a function that creates a Hono sub-app — call with `auth.hono()(Hono)` |
-| `.protect(options?)` | `Function` | Returns route protection middleware. Options: `{ redirect?: string }` |
+| `.protect(options?)` | `Function` | Returns route protection middleware. Options: `{ redirect?, roles?, permissions?, forbiddenRedirect? }` |
 | `.getProvider(name)` | `BaseProvider` | Get a registered provider instance by name |
+| `.on(event, listener)` | `this` | Subscribe to an event |
+| `.once(event, listener)` | `this` | Subscribe to an event once |
+| `.off(event, listener)` | `this` | Unsubscribe from an event |
 | `.tokenStore` | `TokenStore` | The token store instance (default in-memory, or your custom store) |
 | `.tokenRefresher` | `TokenRefresher` | The token refresher instance |
 | `.sessionManager` | `SessionManager` | The session manager instance |
@@ -1000,7 +1204,7 @@ JWT session management.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `.createToken(user)` | `Promise<string>` | Create a signed JWT from an AuthUser object |
+| `.createToken(user, extra?)` | `Promise<string>` | Create a signed JWT. `extra` can include `{ roles, permissions }` for RBAC |
 | `.verifyToken(token)` | `Promise<AuthUser>` | Verify a JWT and return the AuthUser payload |
 | `.buildCookieHeader(token)` | `string` | Build a `Set-Cookie` header value for the session |
 | `.buildClearCookieHeader()` | `string` | Build a `Set-Cookie` header that clears the session |
@@ -1045,6 +1249,7 @@ Abstract base class for OAuth providers. Extend this to add custom providers.
 |--------|-------------|
 | `createProtectMiddleware(sessionManager, options?)` | Create protect middleware without an AuthSnap instance |
 | `createRateLimiter(options?)` | Create a standalone rate limiter: `{ check(key), reset(key), clear() }` |
+| `AccountLinker` | Multi-provider account linking with pluggable store |
 
 ---
 
@@ -1079,11 +1284,11 @@ Abstract base class for OAuth providers. Extend this to add custom providers.
 ## Running Tests
 
 ```bash
-npm test           # Single run (113 tests)
+npm test           # Single run (153 tests)
 npm run test:watch # Watch mode
 ```
 
-Tests cover: config validation, all 6 providers, JWT lifecycle, token store/refresh, route handlers, redirect validation, rate limiting, custom providers, protect middleware, and class instantiation — all without needing real OAuth credentials.
+Tests cover: config validation, all 8 providers, JWT lifecycle, token store/refresh, route handlers, redirect validation, rate limiting, custom providers, protect middleware, RBAC, event system, account linking, and class instantiation — all without needing real OAuth credentials.
 
 ---
 
