@@ -1,5 +1,7 @@
 # AuthSnap
 
+[![NPM](https://nodei.co/npm/auth-snap.png)](https://npmjs.org/package/auth-snap)
+
 **Zero-boilerplate OAuth for any Node.js framework.**
 Add Google, GitHub, Discord, Twitter, Apple, Microsoft, LinkedIn, or Spotify authentication to your app in 3 lines of code. Works with Express, Fastify, and Hono.
 
